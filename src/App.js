@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { Plus, Car, Users, MapPin, Calendar, Clock, AlertTriangle, CheckCircle, CalendarDays } from 'lucide-react';
+import { Plus, Car, Users, MapPin, Calendar as CalendarIcon, Clock, AlertTriangle, CheckCircle, CalendarDays } from 'lucide-react';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import ErrorDisplay from './components/ErrorDisplay';
