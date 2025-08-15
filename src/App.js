@@ -1,16 +1,37 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { Plus, Car, Users, MapPin, Calendar, Clock } from 'lucide-react';
+import { Plus, Car, Users, MapPin, Calendar, Clock, AlertTriangle, CheckCircle, CalendarDays } from 'lucide-react';
+import Calendar from 'react-calendar';
+import 'react-calendar/dist/Calendar.css';
+import ErrorDisplay from './components/ErrorDisplay';
+import CalendarView from './components/CalendarView';
+import RequestForm from './components/RequestForm';
+import CarpoolList from './components/CarpoolList';
 
 // Initialize Supabase client
 const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
 const supabaseKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+/**
+ * Main App component for the Zoo School Carpool application.
+ * Features:
+ * 1. Calendar view for visualizing carpools by date
+ * 2. Enhanced error handling with proper UI display
+ * 3. Improved form validation
+ * 4. Carpool request system for offering and requesting rides
+ * 5. Comprehensive commenting for maintainability
+ */
 function App() {
+  // State management for carpool data and UI
   const [carpools, setCarpools] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [view, setView] = useState('list'); // 'list' or 'calendar'
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  
+  // Form data for creating new carpools
   const [formData, setFormData] = useState({
     driver_name: '',
     destination: '',
@@ -19,14 +40,24 @@ function App() {
     notes: ''
   });
 
-  // Fetch carpools from Supabase
+  // Form validation errors
+  const [formErrors, setFormErrors] = useState({});
+
+  /**
+   * Fetch all carpools from Supabase on component mount
+   */
   useEffect(() => {
     fetchCarpools();
   }, []);
 
+  /**
+   * Fetch carpools from Supabase with comprehensive error handling
+   */
   const fetchCarpools = async () => {
     try {
       setLoading(true);
+      setError(null);
+      
       const { data, error } = await supabase
         .from('carpools')
         .select('*')
@@ -36,25 +67,94 @@ function App() {
       setCarpools(data || []);
     } catch (error) {
       console.error('Error fetching carpools:', error);
+      setError({
+        type: 'fetch',
+        message: 'Failed to load carpools. Please refresh the page.',
+        details: error.message
+      });
     } finally {
       setLoading(false);
     }
   };
 
+  /**
+   * Validate form data before submission
+   * @param {Object} data - Form data to validate
+   * @returns {Object} - Validation errors object
+   */
+  const validateForm = (data) => {
+    const errors = {};
+    
+    // Driver name validation
+    if (!data.driver_name.trim()) {
+      errors.driver_name = 'Driver name is required';
+    } else if (data.driver_name.trim().length < 2) {
+      errors.driver_name = 'Driver name must be at least 2 characters';
+    }
+    
+    // Destination validation
+    if (!data.destination.trim()) {
+      errors.destination = 'Destination is required';
+    } else if (data.destination.trim().length < 3) {
+      errors.destination = 'Destination must be at least 3 characters';
+    }
+    
+    // Departure time validation
+    if (!data.departure_time) {
+      errors.departure_time = 'Departure time is required';
+    } else {
+      const departureDate = new Date(data.departure_time);
+      const now = new Date();
+      if (departureDate <= now) {
+        errors.departure_time = 'Departure time must be in the future';
+      }
+    }
+    
+    // Available seats validation
+    if (data.available_seats < 1 || data.available_seats > 8) {
+      errors.available_seats = 'Available seats must be between 1 and 8';
+    }
+    
+    return errors;
+  };
+
+  /**
+   * Handle form submission with enhanced validation and error handling
+   */
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
     try {
+      // Clear previous errors
+      setFormErrors({});
+      setError(null);
+      
+      // Validate form data
+      const errors = validateForm(formData);
+      if (Object.keys(errors).length > 0) {
+        setFormErrors(errors);
+        return;
+      }
+      
+      // Prepare data for submission
+      const submissionData = {
+        ...formData,
+        driver_name: formData.driver_name.trim(),
+        destination: formData.destination.trim(),
+        notes: formData.notes.trim()
+      };
+      
       const { data, error } = await supabase
         .from('carpools')
-        .insert([formData])
+        .insert([submissionData])
         .select();
       
       if (error) throw error;
       
-      // Update local state
+      // Update local state with new carpool
       setCarpools([...carpools, ...data]);
       
-      // Reset form
+      // Reset form and close
       setFormData({
         driver_name: '',
         destination: '',
@@ -63,19 +163,42 @@ function App() {
         notes: ''
       });
       setShowForm(false);
+      
+      // Show success message
+      setError({
+        type: 'success',
+        message: 'Carpool created successfully!',
+        details: null
+      });
+      
     } catch (error) {
       console.error('Error creating carpool:', error);
-      alert('Error creating carpool. Please try again.');
+      setError({
+        type: 'create',
+        message: 'Failed to create carpool. Please try again.',
+        details: error.message
+      });
     }
   };
 
+  /**
+   * Handle joining a carpool with enhanced error handling
+   * @param {number} carpoolId - ID of the carpool to join
+   * @param {number} currentSeats - Current available seats
+   */
   const handleJoinCarpool = async (carpoolId, currentSeats) => {
     if (currentSeats <= 0) {
-      alert('No seats available!');
+      setError({
+        type: 'join',
+        message: 'No seats available for this carpool.',
+        details: null
+      });
       return;
     }
     
     try {
+      setError(null);
+      
       const { data, error } = await supabase
         .from('carpools')
         .update({ available_seats: currentSeats - 1 })
@@ -91,187 +214,134 @@ function App() {
           : carpool
       ));
       
-      alert('Successfully joined carpool!');
+      setError({
+        type: 'success',
+        message: 'Successfully joined carpool!',
+        details: null
+      });
+      
     } catch (error) {
       console.error('Error joining carpool:', error);
-      alert('Error joining carpool. Please try again.');
+      setError({
+        type: 'join',
+        message: 'Failed to join carpool. Please try again.',
+        details: error.message
+      });
     }
   };
 
+  /**
+   * Format date and time for display
+   * @param {string} dateTimeString - ISO datetime string
+   * @returns {string} - Formatted date and time
+   */
   const formatDateTime = (dateTimeString) => {
     const date = new Date(dateTimeString);
     return date.toLocaleDateString() + ' at ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
   };
 
+  /**
+   * Get carpools for a specific date for calendar view
+   * @param {Date} date - Date to filter by
+   * @returns {Array} - Carpools for the specified date
+   */
+  const getCarpoolsForDate = (date) => {
+    return carpools.filter(carpool => {
+      const carpoolDate = new Date(carpool.departure_time);
+      return carpoolDate.toDateString() === date.toDateString();
+    });
+  };
+
+  /**
+   * Check if a date has any carpools (for calendar tile styling)
+   * @param {Date} date - Date to check
+   * @returns {boolean} - True if date has carpools
+   */
+  const hasCarpool = (date) => {
+    return getCarpoolsForDate(date).length > 0;
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className="max-w-6xl mx-auto px-4 py-8">
         <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
+          {/* Header with navigation */}
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center space-x-3">
               <Car className="h-8 w-8 text-blue-600" />
               <h1 className="text-3xl font-bold text-gray-900">Zoo School Carpool</h1>
             </div>
-            <button
-              onClick={() => setShowForm(!showForm)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Offer Ride</span>
-            </button>
+            <div className="flex items-center space-x-4">
+              {/* View toggle buttons */}
+              <div className="flex bg-gray-100 rounded-lg p-1">
+                <button
+                  onClick={() => setView('list')}
+                  className={`px-4 py-2 rounded-md transition-colors ${
+                    view === 'list' 
+                      ? 'bg-white shadow-sm text-blue-600' 
+                      : 'text-gray-600 hover:text-gray-800'
+                  }`}
+                >
+                  <Users className="h-4 w-4 mr-2 inline" />
+                  List View
+                </button>
+                <button
+                  onClick={() => setView('calendar')}
+                  className={`px-4 py-2 rounded-md transition-colors ${
+                    view === 'calendar' 
+                      ? 'bg-white shadow-sm text-blue-600' 
+                      : 'text-gray-600 hover:text-gray-800'
+                  }`}
+                >
+                  <CalendarDays className="h-4 w-4 mr-2 inline" />
+                  Calendar
+                </button>
+              </div>
+              
+              {/* Offer ride button */}
+              <button
+                onClick={() => setShowForm(!showForm)}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Offer Ride</span>
+              </button>
+            </div>
           </div>
 
+          {/* Error Display Component */}
+          <ErrorDisplay error={error} onDismiss={() => setError(null)} />
+
+          {/* Form for creating new carpool */}
           {showForm && (
-            <form onSubmit={handleSubmit} className="bg-gray-50 p-6 rounded-lg mb-6">
-              <h2 className="text-xl font-semibold mb-4">Create New Carpool</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Driver Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    value={formData.driver_name}
-                    onChange={(e) => setFormData({...formData, driver_name: e.target.value})}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Destination
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    value={formData.destination}
-                    onChange={(e) => setFormData({...formData, destination: e.target.value})}
-                    placeholder="e.g., Zoo Atlanta"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Departure Time
-                  </label>
-                  <input
-                    type="datetime-local"
-                    required
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    value={formData.departure_time}
-                    onChange={(e) => setFormData({...formData, departure_time: e.target.value})}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Available Seats
-                  </label>
-                  <select
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    value={formData.available_seats}
-                    onChange={(e) => setFormData({...formData, available_seats: parseInt(e.target.value)})}
-                  >
-                    {[1, 2, 3, 4, 5, 6, 7].map(num => (
-                      <option key={num} value={num}>{num}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Notes (optional)
-                  </label>
-                  <textarea
-                    rows={3}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    value={formData.notes}
-                    onChange={(e) => setFormData({...formData, notes: e.target.value})}
-                    placeholder="Any additional information..."
-                  />
-                </div>
-              </div>
-              <div className="flex space-x-3 mt-6">
-                <button
-                  type="submit"
-                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
-                >
-                  Create Carpool
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
+            <RequestForm
+              formData={formData}
+              setFormData={setFormData}
+              formErrors={formErrors}
+              onSubmit={handleSubmit}
+              onCancel={() => setShowForm(false)}
+            />
           )}
 
-          <div>
-            <h2 className="text-xl font-semibold mb-4">Available Carpools</h2>
-            {loading ? (
-              <div className="text-center py-8">
-                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                <p className="mt-2 text-gray-600">Loading carpools...</p>
-              </div>
-            ) : carpools.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                <Car className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                <p>No carpools available yet.</p>
-                <p className="text-sm">Be the first to offer a ride!</p>
-              </div>
-            ) : (
-              <div className="grid gap-4">
-                {carpools.map((carpool) => (
-                  <div key={carpool.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2 mb-2">
-                          <Users className="h-4 w-4 text-gray-600" />
-                          <span className="font-semibold">{carpool.driver_name}</span>
-                        </div>
-                        <div className="flex items-center space-x-2 mb-1">
-                          <MapPin className="h-4 w-4 text-gray-600" />
-                          <span className="text-gray-800">{carpool.destination}</span>
-                        </div>
-                        <div className="flex items-center space-x-2 mb-1">
-                          <Clock className="h-4 w-4 text-gray-600" />
-                          <span className="text-gray-800">{formatDateTime(carpool.departure_time)}</span>
-                        </div>
-                        <div className="flex items-center space-x-2 mb-2">
-                          <Car className="h-4 w-4 text-gray-600" />
-                          <span className="text-gray-800">
-                            {carpool.available_seats} {carpool.available_seats === 1 ? 'seat' : 'seats'} available
-                          </span>
-                        </div>
-                        {carpool.notes && (
-                          <p className="text-gray-600 text-sm mt-2">{carpool.notes}</p>
-                        )}
-                      </div>
-                      <div className="flex flex-col items-end space-y-2">
-                        <button
-                          onClick={() => handleJoinCarpool(carpool.id, carpool.available_seats)}
-                          disabled={carpool.available_seats === 0}
-                          className={`px-4 py-2 rounded-lg transition-colors ${
-                            carpool.available_seats > 0
-                              ? 'bg-blue-600 text-white hover:bg-blue-700'
-                              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          }`}
-                        >
-                          {carpool.available_seats > 0 ? 'Join Ride' : 'Full'}
-                        </button>
-                        <span className={`text-sm font-medium ${
-                          carpool.available_seats > 0 ? 'text-green-600' : 'text-red-600'
-                        }`}>
-                          {carpool.available_seats > 0 ? 'Available' : 'No seats left'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* Main content area - either list view or calendar view */}
+          {view === 'calendar' ? (
+            <CalendarView
+              carpools={carpools}
+              selectedDate={selectedDate}
+              setSelectedDate={setSelectedDate}
+              hasCarpool={hasCarpool}
+              getCarpoolsForDate={getCarpoolsForDate}
+              onJoinCarpool={handleJoinCarpool}
+              formatDateTime={formatDateTime}
+            />
+          ) : (
+            <CarpoolList
+              carpools={carpools}
+              loading={loading}
+              onJoinCarpool={handleJoinCarpool}
+              formatDateTime={formatDateTime}
+            />
+          )}
         </div>
       </div>
     </div>
